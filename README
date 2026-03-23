@@ -1,0 +1,130 @@
+# ◈ GraphQuery — Business Data Explorer
+
+A graph-based data modeling and natural language query system built for the Forward Deployed Engineer assignment. Unifies fragmented business data (orders, deliveries, invoices, payments) into an interactive graph with an LLM-powered chat interface that translates plain English into SQL and returns data-backed answers.
+
+**[Live Demo](https://YOUR-USERNAME.github.io/graph-query-system)**
+
+---
+
+## What it does
+
+- Visualizes business entities as an interactive graph — customers, orders, deliveries, invoices, payments, and products as nodes with typed edges between them
+- Lets you click any node to inspect its metadata
+- Filter the graph by entity type with animated focus
+- Ask questions in plain English — the LLM writes the SQL, runs it against a live database, and shows you the results alongside the generated query
+
+---
+
+## Architecture
+
+Single HTML file, no backend, no build step. Four layers:
+
+| Layer | What it does |
+|---|---|
+| **Data** | Raw JS objects loaded into a sql.js SQLite database running in WebAssembly in the browser |
+| **Graph** | vis.js Network renders nodes and edges with color-coded entity types and directional relationships |
+| **Query** | Groq LLM (llama-3.3-70b) receives natural language, returns structured JSON with a SQL query, JS executes it locally |
+| **UI** | Dark split-pane layout — graph canvas left, chat panel right |
+
+### Business flow modeled
+
+```
+Customer → Sales Order → Delivery → Invoice → Payment
+                ↓
+          Order Items → Products
+```
+
+---
+
+## Database Choice — sql.js (SQLite in WebAssembly)
+
+The demo needed to run as a static file with no authentication and no server. sql.js compiles SQLite to WebAssembly and runs it entirely in the browser.
+
+**Why this works well here:**
+- Deploys to GitHub Pages as a single file — zero infrastructure
+- Full SQL support — every JOIN, GROUP BY, LEFT JOIN works identically to server-side SQLite
+- Queries execute in microseconds — no network round-trip for data
+- No hosting cost
+
+**Tradeoff:** Data resets on page refresh. Acceptable for a fixed demo dataset; a production system would use a persistent store (Postgres, Neo4j for true graph queries, etc.)
+
+---
+
+## LLM Prompting Strategy
+
+**Provider:** Groq — free tier (14,400 req/day), sub-second latency, OpenAI-compatible API, native CORS support so it works directly from the browser.
+
+**Model:** `llama-3.3-70b-versatile`
+
+### Structured output protocol
+
+The system prompt forces the model to always return one of exactly two JSON shapes — never free text:
+
+```json
+// Dataset question
+{"type": "query", "sql": "SELECT ...", "answer_prefix": "Here are..."}
+
+// Off-topic question  
+{"type": "off_topic", "message": "This system only answers questions about the business dataset."}
+```
+
+The client parses this JSON, executes the SQL locally, and renders results. If parsing fails, the error is caught and shown gracefully — raw LLM output never reaches the user.
+
+### Prompt design principles
+
+- Full schema injected — all 7 table names and columns in the system prompt so the model never guesses column names
+- Relationships described explicitly — foreign key paths written out so JOIN logic is unambiguous  
+- Sample IDs provided — model knows valid ID ranges, won't fabricate non-existent records
+- SQLite dialect enforced — prompt specifies compatibility constraints, LIMIT 20 max, no DDL/DML
+- Temperature = 0 — deterministic output for consistent SQL generation
+
+---
+
+## Guardrails
+
+Enforced at two levels:
+
+**1. LLM prompt level** — the system prompt's first rule instructs the model to return `{"type":"off_topic"}` for anything unrelated to the dataset. This catches general knowledge questions, creative writing, math, coding help, and any request that doesn't reference orders, customers, products, deliveries, invoices, or payments.
+
+**2. Client level** — the JS checks the returned `type` field. Only `query` responses trigger SQL execution. `off_topic` renders a styled error message. Any response that fails JSON parsing is caught and displayed as an error.
+
+Example rejected prompts: `"Who won the World Cup?"`, `"Write me a poem"`, `"What is 2+2?"` — all return the off-topic message.
+
+---
+
+## Example Queries
+
+All pre-loaded as suggestion chips:
+
+| Query | SQL strategy |
+|---|---|
+| Top products by billing docs | `GROUP BY` product with `COUNT` of invoice references via `order_items` JOIN |
+| Trace full flow of SO-1001 | Multi-table JOIN across all 5 entity tables |
+| Orders delivered but not invoiced | `LEFT JOIN invoices` + `WHERE invoices.id IS NULL` |
+| Revenue by customer | `SUM(total_value) GROUP BY` customer name |
+| Overdue invoices | `WHERE status = 'Overdue'` with amount and due date |
+| Payment methods breakdown | `GROUP BY method` with count and sum |
+
+---
+
+## Bonus Features
+
+- Generated SQL shown in every response with a one-click copy button
+- Graph node filtering — focus view on one entity type at a time
+- Node inspector — click any node to see full metadata in a slide-in panel
+- Conversation history stays visible throughout the session
+- Broken flow detection — LEFT JOIN queries surface incomplete order pipelines
+- Live KPI header — node count, edge count, order count, total revenue
+
+---
+
+## Tech Stack
+
+- **vis.js** — graph visualization
+- **sql.js** — SQLite in WebAssembly
+- **Groq API** — LLM inference (llama-3.3-70b-versatile)
+- **Vanilla JS / HTML / CSS** — no framework, no build tool
+
+## Deployment
+
+Static file on GitHub Pages. No server, no environment variables, no dependencies to install.

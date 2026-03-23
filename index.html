@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GraphQuery — Business Data Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+<style>
+/* ── Tokens ─────────────────────────────────── */
+:root {
+  --c0:#080b12; --c1:#0f1320; --c2:#161d2e; --c3:#1e2840;
+  --b1:#1f2d4a; --b2:#2e3f60;
+  --t1:#e8edf5; --t2:#8a9bbf; --t3:#4a5878;
+  --indigo:#6475f0; --violet:#9b77f0;
+  --emerald:#10c97a; --amber:#f5a623; --rose:#f06090;
+  --teal:#0fbfb0; --sky:#38bdf8;
+  --r:10px; --rs:6px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --mono:'Fira Code','Cascadia Code','Courier New',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--c0);color:var(--t1);height:100vh;overflow:hidden;font-size:13px;line-height:1.5}
+*{scrollbar-width:thin;scrollbar-color:var(--b2) transparent}
+
+/* ── Layout ─────────────────────────────────── */
+.app{display:grid;grid-template-columns:1fr 400px;grid-template-rows:52px 1fr;height:100vh}
+
+/* ── Header ─────────────────────────────────── */
+.header{grid-column:1/-1;background:var(--c1);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 18px;gap:12px}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-icon{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--indigo),var(--violet));display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.logo-text{font-size:15px;font-weight:700;letter-spacing:-.3px}
+.logo-sub{font-size:11px;color:var(--t3);padding-left:10px;border-left:1px solid var(--b1);margin-left:2px}
+.live{width:7px;height:7px;border-radius:50%;background:var(--emerald);box-shadow:0 0 0 2px rgba(16,201,122,.25);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 2px rgba(16,201,122,.25)}50%{box-shadow:0 0 0 5px rgba(16,201,122,.08)}}
+.kpis{margin-left:auto;display:flex;gap:24px}
+.kpi{text-align:right}
+.kpi-v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.kpi-l{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-top:1px}
+
+/* ── Graph panel ────────────────────────────── */
+.graph-panel{position:relative;background:var(--c0);overflow:hidden}
+.graph-panel::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle,var(--b1) 1px,transparent 1px);background-size:28px 28px;opacity:.4;pointer-events:none;z-index:0}
+#gc{width:100%;height:100%;position:relative;z-index:1}
+
+/* ── Toolbar ────────────────────────────────── */
+.toolbar{position:absolute;top:14px;left:14px;z-index:10;display:flex;gap:5px;align-items:center;background:var(--c1);border:1px solid var(--b1);border-radius:var(--r);padding:5px}
+.tb{padding:5px 11px;border-radius:var(--rs);border:none;cursor:pointer;font-size:11px;font-family:var(--font);font-weight:500;color:var(--t2);background:transparent;transition:background .15s,color .15s;display:flex;align-items:center;gap:4px}
+.tb:hover{background:var(--c3);color:var(--t1)}
+.tb.on{background:var(--indigo);color:#fff}
+.tb-sep{width:1px;height:18px;background:var(--b1);margin:0 2px}
+
+/* ── Legend ─────────────────────────────────── */
+.legend{position:absolute;bottom:14px;left:14px;z-index:10;background:var(--c1);border:1px solid var(--b1);border-radius:var(--r);padding:10px 13px;display:flex;flex-direction:column;gap:5px}
+.leg{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--t2)}
+.leg-d{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* ── Inspector ──────────────────────────────── */
+.inspector{position:absolute;bottom:14px;right:14px;z-index:10;background:var(--c1);border:1px solid var(--b1);border-radius:var(--r);width:230px;overflow:hidden;transform:translateY(8px);opacity:0;pointer-events:none;transition:transform .2s,opacity .2s}
+.inspector.open{transform:translateY(0);opacity:1;pointer-events:auto}
+.insp-h{padding:10px 13px 8px;background:var(--c2);border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:7px}
+.insp-badge{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px}
+.insp-name{font-size:12px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.insp-x{color:var(--t3);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0}
+.insp-x:hover{color:var(--t1)}
+.insp-row{display:flex;justify-content:space-between;align-items:center;padding:4px 13px;gap:8px}
+.insp-row:hover{background:var(--c2)}
+.insp-k{color:var(--t3);font-size:11px;flex-shrink:0}
+.insp-v{color:var(--t1);font-size:11px;font-weight:500;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+
+/* ── Badge colors ───────────────────────────── */
+.b-customer{background:rgba(16,201,122,.15);color:var(--emerald)}
+.b-order{background:rgba(100,117,240,.15);color:var(--indigo)}
+.b-delivery{background:rgba(245,166,35,.15);color:var(--amber)}
+.b-invoice{background:rgba(240,96,144,.15);color:var(--rose)}
+.b-payment{background:rgba(15,191,176,.15);color:var(--teal)}
+.b-product{background:rgba(56,189,248,.15);color:var(--sky)}
+
+/* ── Chat panel ─────────────────────────────── */
+.chat{background:var(--c1);border-left:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
+.chat-head{padding:12px 16px;border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:10px}
+.chat-icon{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,rgba(100,117,240,.2),rgba(155,119,240,.2));border:1px solid rgba(100,117,240,.3);display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.chat-title{font-size:13px;font-weight:600}
+.chat-sub{font-size:11px;color:var(--t3);margin-top:1px}
+
+/* ── Messages ───────────────────────────────── */
+.msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.msgs::-webkit-scrollbar{width:3px}
+.msgs::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+.msg{display:flex;flex-direction:column;gap:3px}
+.msg-who{font-size:10px;color:var(--t3);padding:0 3px;letter-spacing:.3px}
+.msg.user .msg-who{text-align:right}
+.bubble{padding:9px 12px;border-radius:11px;font-size:12.5px;line-height:1.65}
+.msg.user .bubble{background:var(--indigo);color:#fff;border-bottom-right-radius:3px;align-self:flex-end}
+.msg.bot  .bubble{background:var(--c2);border:1px solid var(--b1);border-bottom-left-radius:3px}
+.msg.bot  .bubble.err{border-color:var(--rose);background:rgba(240,96,144,.07)}
+
+/* ── SQL viewer ─────────────────────────────── */
+.sql-box{margin-top:8px;background:var(--c0);border:1px solid var(--b1);border-radius:var(--rs);overflow:hidden}
+.sql-hd{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;background:var(--c2);border-bottom:1px solid var(--b1)}
+.sql-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--violet)}
+.sql-copy{font-size:10px;color:var(--t3);cursor:pointer;padding:1px 6px;border-radius:3px;border:1px solid var(--b1);background:var(--c1);transition:color .15s}
+.sql-copy:hover{color:var(--t1)}
+.sql-pre{padding:9px 11px;font-family:var(--mono);font-size:10.5px;color:#b8a4f5;line-height:1.75;overflow-x:auto;white-space:pre}
+
+/* ── Results table ──────────────────────────── */
+.tbl-wrap{margin-top:8px;border:1px solid var(--b1);border-radius:var(--rs);overflow:hidden}
+.rtbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.rtbl th{background:var(--c2);color:var(--t3);padding:5px 9px;text-align:left;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.rtbl td{padding:5px 9px;border-bottom:1px solid rgba(255,255,255,.035)}
+.rtbl tr:last-child td{border:none}
+.rtbl tr:hover td{background:var(--c3)}
+.row-ct{font-size:10px;color:var(--t3);margin-top:5px;text-align:right}
+
+/* ── Chips ──────────────────────────────────── */
+.chips{padding:10px 14px;border-top:1px solid var(--b1);display:flex;flex-wrap:wrap;gap:5px}
+.chip{font-size:10.5px;color:var(--t2);background:var(--c2);border:1px solid var(--b1);padding:4px 10px;border-radius:20px;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
+.chip:hover{border-color:var(--indigo);color:var(--indigo);background:rgba(100,117,240,.08)}
+
+/* ── Input ──────────────────────────────────── */
+.input-row{padding:11px 14px;border-top:1px solid var(--b1);display:flex;gap:8px;align-items:flex-end}
+.chat-in{flex:1;background:var(--c2);border:1px solid var(--b1);border-radius:var(--rs);padding:8px 11px;color:var(--t1);font-size:12.5px;font-family:var(--font);outline:none;resize:none;line-height:1.5;max-height:100px;transition:border-color .2s}
+.chat-in:focus{border-color:var(--indigo)}
+.chat-in::placeholder{color:var(--t3)}
+.send{width:34px;height:34px;border-radius:var(--rs);background:var(--indigo);border:none;color:#fff;cursor:pointer;display:grid;place-items:center;flex-shrink:0;transition:opacity .15s,transform .1s}
+.send:hover{opacity:.85}
+.send:active{transform:scale(.95)}
+.send:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── Dots loader ────────────────────────────── */
+.dots{display:flex;gap:4px;align-items:center;height:18px}
+.dots i{display:block;width:5px;height:5px;border-radius:50%;background:var(--t3);animation:blink .9s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}
+.dots i:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%,80%,100%{transform:scale(.5);opacity:.3}40%{transform:scale(1);opacity:1}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">◈</div>
+      <span class="logo-text">GraphQuery</span>
+      <span class="logo-sub">Business Intelligence Explorer</span>
+    </div>
+    <div class="live" title="System ready"></div>
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-v" id="kv-nodes">—</div><div class="kpi-l">Nodes</div></div>
+      <div class="kpi"><div class="kpi-v" id="kv-edges">—</div><div class="kpi-l">Edges</div></div>
+      <div class="kpi"><div class="kpi-v" id="kv-orders">—</div><div class="kpi-l">Orders</div></div>
+      <div class="kpi"><div class="kpi-v" id="kv-rev">—</div><div class="kpi-l">Revenue ($)</div></div>
+    </div>
+  </header>
+
+  <section class="graph-panel">
+    <div id="gc"></div>
+
+    <nav class="toolbar">
+      <button class="tb on" data-f="all"      onclick="filter(this,'all')">All</button>
+      <div class="tb-sep"></div>
+      <button class="tb" data-f="customer"  onclick="filter(this,'customer')">🏢 Customers</button>
+      <button class="tb" data-f="order"     onclick="filter(this,'order')">📋 Orders</button>
+      <button class="tb" data-f="delivery"  onclick="filter(this,'delivery')">🚚 Deliveries</button>
+      <button class="tb" data-f="invoice"   onclick="filter(this,'invoice')">🧾 Invoices</button>
+      <button class="tb" data-f="payment"   onclick="filter(this,'payment')">💳 Payments</button>
+      <div class="tb-sep"></div>
+      <button class="tb" onclick="resetView()">↺ Fit</button>
+    </nav>
+
+    <div class="legend">
+      <div class="leg"><span class="leg-d" style="background:var(--emerald)"></span>Customer</div>
+      <div class="leg"><span class="leg-d" style="background:var(--indigo)"></span>Order</div>
+      <div class="leg"><span class="leg-d" style="background:var(--amber)"></span>Delivery</div>
+      <div class="leg"><span class="leg-d" style="background:var(--rose)"></span>Invoice</div>
+      <div class="leg"><span class="leg-d" style="background:var(--teal)"></span>Payment</div>
+      <div class="leg"><span class="leg-d" style="background:var(--sky)"></span>Product</div>
+    </div>
+
+    <div class="inspector" id="inspector">
+      <div class="insp-h">
+        <span class="insp-badge" id="insp-badge"></span>
+        <span class="insp-name"  id="insp-name"></span>
+        <span class="insp-x" onclick="closeInsp()">×</span>
+      </div>
+      <div id="insp-body"></div>
+    </div>
+  </section>
+
+  <aside class="chat">
+    <div class="chat-head">
+      <div class="chat-icon">🔍</div>
+      <div>
+        <div class="chat-title">Natural Language Query</div>
+        <div class="chat-sub">Ask anything — I'll write the SQL and run it live</div>
+      </div>
+    </div>
+
+    <div class="msgs" id="msgs">
+      <div class="msg bot">
+        <div class="msg-who">Assistant</div>
+        <div class="bubble">
+          Hi! I query your <strong>Sales Orders, Deliveries, Invoices, Payments, Customers</strong> and <strong>Products</strong> in real time.<br><br>
+          Every answer is backed by live SQL — nothing invented. Use the suggestions below or ask your own question.
+        </div>
+      </div>
+    </div>
+
+    <div class="chips">
+      <span class="chip" onclick="ask(this)">Top products by billing docs</span>
+      <span class="chip" onclick="ask(this)">Trace full flow of SO-1001</span>
+      <span class="chip" onclick="ask(this)">Orders delivered but not invoiced</span>
+      <span class="chip" onclick="ask(this)">Revenue by customer</span>
+      <span class="chip" onclick="ask(this)">Overdue invoices</span>
+      <span class="chip" onclick="ask(this)">Payment methods breakdown</span>
+    </div>
+
+    <div class="input-row">
+      <textarea class="chat-in" id="cin" rows="1"
+        placeholder="Ask a question about your data…"
+        onkeydown="onKey(event)" oninput="grow(this)"></textarea>
+      <button class="send" id="sendbtn" onclick="send()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </aside>
+</div>
+
+
+<script>
+// ═══════════════════════════════════════════════
+//  DATASET
+// ═══════════════════════════════════════════════
+const D = {
+  customers:[
+    {id:'C001',name:'Acme Corp',city:'New York',country:'US',segment:'Enterprise'},
+    {id:'C002',name:'TechFlow GmbH',city:'Berlin',country:'DE',segment:'Mid-Market'},
+    {id:'C003',name:'SunPeak Ltd',city:'London',country:'GB',segment:'Enterprise'},
+    {id:'C004',name:'NovaTrade',city:'Mumbai',country:'IN',segment:'SMB'},
+    {id:'C005',name:'Pacific Ventures',city:'Sydney',country:'AU',segment:'Mid-Market'},
+    {id:'C006',name:'AlphaBuilt',city:'Paris',country:'FR',segment:'Enterprise'},
+  ],
+  products:[
+    {id:'P001',name:'Industrial Pump A',category:'Machinery',unit_price:4500,unit:'EA'},
+    {id:'P002',name:'Steel Pipe 40mm',category:'Raw Material',unit_price:120,unit:'M'},
+    {id:'P003',name:'Control Module X9',category:'Electronics',unit_price:890,unit:'EA'},
+    {id:'P004',name:'Valve Assembly V2',category:'Components',unit_price:340,unit:'EA'},
+    {id:'P005',name:'Bearing Set BS7',category:'Components',unit_price:220,unit:'SET'},
+    {id:'P006',name:'Safety Relay SR',category:'Electronics',unit_price:670,unit:'EA'},
+    {id:'P007',name:'Gear Unit G4',category:'Machinery',unit_price:2300,unit:'EA'},
+  ],
+  sales_orders:[
+    {id:'SO-1001',customer_id:'C001',order_date:'2024-01-05',status:'Completed',total_value:22500,currency:'USD'},
+    {id:'SO-1002',customer_id:'C002',order_date:'2024-01-12',status:'Completed',total_value:8400,currency:'EUR'},
+    {id:'SO-1003',customer_id:'C003',order_date:'2024-01-18',status:'In Progress',total_value:15200,currency:'GBP'},
+    {id:'SO-1004',customer_id:'C004',order_date:'2024-02-03',status:'Completed',total_value:5600,currency:'USD'},
+    {id:'SO-1005',customer_id:'C001',order_date:'2024-02-14',status:'Completed',total_value:31000,currency:'USD'},
+    {id:'SO-1006',customer_id:'C005',order_date:'2024-02-20',status:'In Progress',total_value:9800,currency:'AUD'},
+    {id:'SO-1007',customer_id:'C006',order_date:'2024-03-01',status:'Cancelled',total_value:7200,currency:'EUR'},
+    {id:'SO-1008',customer_id:'C003',order_date:'2024-03-08',status:'Completed',total_value:18900,currency:'GBP'},
+    {id:'SO-1009',customer_id:'C002',order_date:'2024-03-15',status:'Completed',total_value:12300,currency:'EUR'},
+    {id:'SO-1010',customer_id:'C004',order_date:'2024-03-22',status:'In Progress',total_value:4200,currency:'USD'},
+  ],
+  order_items:[
+    {id:'OI-001',order_id:'SO-1001',product_id:'P001',quantity:4,unit_price:4500,line_total:18000},
+    {id:'OI-002',order_id:'SO-1001',product_id:'P004',quantity:10,unit_price:340,line_total:3400},
+    {id:'OI-003',order_id:'SO-1001',product_id:'P005',quantity:5,unit_price:220,line_total:1100},
+    {id:'OI-004',order_id:'SO-1002',product_id:'P003',quantity:6,unit_price:890,line_total:5340},
+    {id:'OI-005',order_id:'SO-1002',product_id:'P006',quantity:4,unit_price:670,line_total:2680},
+    {id:'OI-006',order_id:'SO-1002',product_id:'P005',quantity:2,unit_price:220,line_total:440},
+    {id:'OI-007',order_id:'SO-1003',product_id:'P002',quantity:50,unit_price:120,line_total:6000},
+    {id:'OI-008',order_id:'SO-1003',product_id:'P007',quantity:4,unit_price:2300,line_total:9200},
+    {id:'OI-009',order_id:'SO-1004',product_id:'P004',quantity:8,unit_price:340,line_total:2720},
+    {id:'OI-010',order_id:'SO-1004',product_id:'P006',quantity:4,unit_price:670,line_total:2680},
+    {id:'OI-011',order_id:'SO-1005',product_id:'P001',quantity:5,unit_price:4500,line_total:22500},
+    {id:'OI-012',order_id:'SO-1005',product_id:'P007',quantity:3,unit_price:2300,line_total:6900},
+    {id:'OI-013',order_id:'SO-1005',product_id:'P003',quantity:2,unit_price:890,line_total:1780},
+    {id:'OI-014',order_id:'SO-1006',product_id:'P002',quantity:40,unit_price:120,line_total:4800},
+    {id:'OI-015',order_id:'SO-1006',product_id:'P005',quantity:10,unit_price:220,line_total:2200},
+    {id:'OI-016',order_id:'SO-1007',product_id:'P003',quantity:5,unit_price:890,line_total:4450},
+    {id:'OI-017',order_id:'SO-1007',product_id:'P006',quantity:3,unit_price:670,line_total:2010},
+    {id:'OI-018',order_id:'SO-1008',product_id:'P001',quantity:3,unit_price:4500,line_total:13500},
+    {id:'OI-019',order_id:'SO-1008',product_id:'P004',quantity:5,unit_price:340,line_total:1700},
+    {id:'OI-020',order_id:'SO-1009',product_id:'P003',quantity:8,unit_price:890,line_total:7120},
+    {id:'OI-021',order_id:'SO-1009',product_id:'P007',quantity:2,unit_price:2300,line_total:4600},
+    {id:'OI-022',order_id:'SO-1010',product_id:'P005',quantity:8,unit_price:220,line_total:1760},
+    {id:'OI-023',order_id:'SO-1010',product_id:'P004',quantity:5,unit_price:340,line_total:1700},
+  ],
+  deliveries:[
+    {id:'DEL-001',order_id:'SO-1001',delivery_date:'2024-01-12',status:'Delivered',plant:'Plant-A',tracking:'TRK001'},
+    {id:'DEL-002',order_id:'SO-1002',delivery_date:'2024-01-20',status:'Delivered',plant:'Plant-B',tracking:'TRK002'},
+    {id:'DEL-003',order_id:'SO-1003',delivery_date:'2024-01-28',status:'In Transit',plant:'Plant-A',tracking:'TRK003'},
+    {id:'DEL-004',order_id:'SO-1004',delivery_date:'2024-02-10',status:'Delivered',plant:'Plant-C',tracking:'TRK004'},
+    {id:'DEL-005',order_id:'SO-1005',delivery_date:'2024-02-22',status:'Delivered',plant:'Plant-A',tracking:'TRK005'},
+    {id:'DEL-006',order_id:'SO-1008',delivery_date:'2024-03-15',status:'Delivered',plant:'Plant-B',tracking:'TRK006'},
+    {id:'DEL-007',order_id:'SO-1009',delivery_date:'2024-03-25',status:'Delivered',plant:'Plant-C',tracking:'TRK007'},
+  ],
+  invoices:[
+    {id:'INV-2001',order_id:'SO-1001',invoice_date:'2024-01-15',amount:22500,status:'Paid',due_date:'2024-02-15'},
+    {id:'INV-2002',order_id:'SO-1002',invoice_date:'2024-01-25',amount:8400,status:'Paid',due_date:'2024-02-25'},
+    {id:'INV-2003',order_id:'SO-1004',invoice_date:'2024-02-12',amount:5600,status:'Paid',due_date:'2024-03-12'},
+    {id:'INV-2004',order_id:'SO-1005',invoice_date:'2024-02-25',amount:31000,status:'Overdue',due_date:'2024-03-25'},
+    {id:'INV-2005',order_id:'SO-1008',invoice_date:'2024-03-18',amount:18900,status:'Pending',due_date:'2024-04-18'},
+    {id:'INV-2006',order_id:'SO-1009',invoice_date:'2024-03-28',amount:12300,status:'Pending',due_date:'2024-04-28'},
+  ],
+  payments:[
+    {id:'PAY-001',invoice_id:'INV-2001',payment_date:'2024-02-10',amount:22500,method:'Wire Transfer',status:'Cleared'},
+    {id:'PAY-002',invoice_id:'INV-2002',payment_date:'2024-02-20',amount:8400,method:'Credit Card',status:'Cleared'},
+    {id:'PAY-003',invoice_id:'INV-2003',payment_date:'2024-03-10',amount:5600,method:'Wire Transfer',status:'Cleared'},
+  ],
+};
+
+// ═══════════════════════════════════════════════
+//  DATABASE
+// ═══════════════════════════════════════════════
+let db = null;
+
+async function initDB() {
+  const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}` });
+  db = new SQL.Database();
+
+  const schemas = {
+    customers:    'id TEXT PRIMARY KEY,name TEXT,city TEXT,country TEXT,segment TEXT',
+    products:     'id TEXT PRIMARY KEY,name TEXT,category TEXT,unit_price REAL,unit TEXT',
+    sales_orders: 'id TEXT PRIMARY KEY,customer_id TEXT,order_date TEXT,status TEXT,total_value REAL,currency TEXT',
+    order_items:  'id TEXT PRIMARY KEY,order_id TEXT,product_id TEXT,quantity INTEGER,unit_price REAL,line_total REAL',
+    deliveries:   'id TEXT PRIMARY KEY,order_id TEXT,delivery_date TEXT,status TEXT,plant TEXT,tracking TEXT',
+    invoices:     'id TEXT PRIMARY KEY,order_id TEXT,invoice_date TEXT,amount REAL,status TEXT,due_date TEXT',
+    payments:     'id TEXT PRIMARY KEY,invoice_id TEXT,payment_date TEXT,amount REAL,method TEXT,status TEXT',
+  };
+
+  for (const [t, s] of Object.entries(schemas)) {
+    db.run(`CREATE TABLE ${t}(${s})`);
+    for (const r of D[t]) {
+      const v = Object.values(r);
+      db.run(`INSERT INTO ${t} VALUES(${v.map(()=>'?').join(',')})`, v);
+    }
+  }
+
+  const rev = D.sales_orders.reduce((s,o) => s + o.total_value, 0);
+  g('kv-orders').textContent = D.sales_orders.length;
+  g('kv-rev').textContent    = (rev/1000).toFixed(0) + 'K';
+}
+
+function runSQL(sql) {
+  const res = db.exec(sql);
+  if (!res.length) return { columns:[], rows:[], count:0 };
+  return { columns:res[0].columns, rows:res[0].values, count:res[0].values.length };
+}
+
+// ═══════════════════════════════════════════════
+//  GRAPH
+// ═══════════════════════════════════════════════
+let net = null, allN = [];
+
+const GSTYLE = {
+  customer: { c:'#10c97a', bg:'#051f14', shape:'ellipse', sz:22 },
+  order:    { c:'#6475f0', bg:'#0d1230', shape:'box',     sz:16 },
+  delivery: { c:'#f5a623', bg:'#1f1204', shape:'box',     sz:14 },
+  invoice:  { c:'#f06090', bg:'#1f0511', shape:'box',     sz:14 },
+  payment:  { c:'#0fbfb0', bg:'#021a19', shape:'box',     sz:14 },
+  product:  { c:'#38bdf8', bg:'#031622', shape:'box',     sz:13 },
+};
+
+function nStyle(group) {
+  const s = GSTYLE[group];
+  return {
+    color:{ background:s.bg, border:s.c, highlight:{background:s.bg,border:'#fff'} },
+    font:{ color:s.c, size:11, face:'Inter,-apple-system,sans-serif' },
+    borderWidth:1.5, shape:s.shape, size:s.sz,
+    shapeProperties:{ borderRadius:4 }, margin:6,
+  };
+}
+
+function buildGraph() {
+  const nodes = [], edges = [];
+  const N = (id, label, group, data, title) => nodes.push({ id, label, group, data, title, ...nStyle(group) });
+  const E = (from, to, label, color, dashes=false) =>
+    edges.push({ from, to, label, arrows:'to', dashes, color:{color}, font:{color:'#4a5878',size:9,face:'Inter'}, width:1 });
+
+  D.customers.forEach(c => N(`c:${c.id}`, c.name, 'customer', c, `${c.city} · ${c.segment}`));
+
+  D.sales_orders.forEach(o => {
+    N(`o:${o.id}`, o.id, 'order', o, `${o.status} · ${o.currency} ${o.total_value.toLocaleString()}`);
+    E(`c:${o.customer_id}`, `o:${o.id}`, 'placed', 'rgba(100,117,240,.5)');
+  });
+
+  D.deliveries.forEach(d => {
+    N(`d:${d.id}`, d.id, 'delivery', d, `${d.status} · ${d.plant}`);
+    E(`o:${d.order_id}`, `d:${d.id}`, 'ships', 'rgba(245,166,35,.5)');
+  });
+
+  D.invoices.forEach(i => {
+    N(`i:${i.id}`, i.id, 'invoice', i, `${i.status} · $${i.amount.toLocaleString()}`);
+    E(`o:${i.order_id}`, `i:${i.id}`, 'billed', 'rgba(240,96,144,.5)');
+  });
+
+  D.payments.forEach(p => {
+    N(`p:${p.id}`, p.id, 'payment', p, `${p.method} · $${p.amount.toLocaleString()}`);
+    E(`i:${p.invoice_id}`, `p:${p.id}`, 'paid', 'rgba(15,191,176,.5)');
+  });
+
+  D.products.forEach(pr => N(`pr:${pr.id}`, pr.name.split(' ').slice(0,2).join(' '), 'product', pr, `${pr.category} · $${pr.unit_price}`));
+  D.order_items.forEach(oi => E(`o:${oi.order_id}`, `pr:${oi.product_id}`, '', 'rgba(56,189,248,.2)', true));
+
+  allN = nodes;
+
+  net = new vis.Network(
+    g('gc'),
+    { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges.map((e,i)=>({...e,id:i}))) },
+    {
+      physics:{ solver:'forceAtlas2Based', forceAtlas2Based:{gravitationalConstant:-45,centralGravity:.015,springLength:110,damping:.75}, stabilization:{iterations:220} },
+      interaction:{ hover:true, tooltipDelay:180 },
+      nodes:{ borderWidthSelected:2.5 },
+      edges:{ smooth:{type:'curvedCW',roundness:.12}, selectionWidth:2 },
+    }
+  );
+
+  net.on('stabilizationIterationsDone', () => {
+    net.setOptions({ physics:{ enabled:false } });
+    g('kv-nodes').textContent = nodes.length;
+    g('kv-edges').textContent = edges.length;
+  });
+
+  net.on('click', ({ nodes:sel }) => {
+    if (!sel.length) { closeInsp(); return; }
+    const node = allN.find(n => n.id === sel[0]);
+    if (node) openInsp(node);
+  });
+}
+
+function openInsp(node) {
+  const badge = g('insp-badge');
+  badge.textContent = node.group;
+  badge.className = `insp-badge b-${node.group}`;
+  g('insp-name').textContent = node.label;
+  g('insp-body').innerHTML = Object.entries(node.data)
+    .map(([k,v]) => `<div class="insp-row"><span class="insp-k">${k.replace(/_/g,' ')}</span><span class="insp-v" title="${v}">${v}</span></div>`)
+    .join('');
+  g('inspector').classList.add('open');
+}
+
+function closeInsp() { g('inspector').classList.remove('open'); }
+
+function filter(btn, group) {
+  document.querySelectorAll('.tb[data-f]').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  if (group === 'all') { net?.fit(); return; }
+  const ids = allN.filter(n => n.group === group).map(n => n.id);
+  net?.selectNodes(ids);
+  if (ids.length) net?.fit({ nodes:ids, animation:{duration:400,easingFunction:'easeInOutQuad'} });
+}
+
+function resetView() {
+  document.querySelectorAll('.tb[data-f]').forEach(b => b.classList.remove('on'));
+  document.querySelector('.tb[data-f="all"]').classList.add('on');
+  closeInsp(); net?.unselectAll();
+  net?.fit({ animation:{duration:400,easingFunction:'easeInOutQuad'} });
+}
+
+// ═══════════════════════════════════════════════
+//  LLM
+// ═══════════════════════════════════════════════
+const SCHEMA = `Tables:
+- customers(id,name,city,country,segment)
+- products(id,name,category,unit_price,unit)
+- sales_orders(id,customer_id,order_date,status,total_value,currency)
+- order_items(id,order_id,product_id,quantity,unit_price,line_total)
+- deliveries(id,order_id,delivery_date,status,plant,tracking)
+- invoices(id,order_id,invoice_date,amount,status,due_date)
+- payments(id,invoice_id,payment_date,amount,method,status)
+Relationships: customers→sales_orders→order_items→products; sales_orders→deliveries; sales_orders→invoices→payments
+IDs: C001-C006, P001-P007, SO-1001–SO-1010, DEL-001–DEL-007, INV-2001–INV-2006, PAY-001–PAY-003`;
+
+const SYS = `You are a business data analyst. ONLY answer questions about this SQLite dataset:\n${SCHEMA}\n
+Rules:
+1. Off-topic → {"type":"off_topic","message":"This system only answers questions about the business dataset."}
+2. Dataset questions → {"type":"query","sql":"<single SELECT, LIMIT 20>","answer_prefix":"<one-sentence intro>"}
+3. SQLite only. No DDL/DML. For broken flows use LEFT JOIN + NULL check.
+Reply with JSON only.`;
+
+// API calls go through a Cloudflare Worker — key never exposed in frontend
+const WORKER_URL = 'https://groq-proxy.svkunalpatil.workers.dev/';
+
+async function callLLM(msg) {
+  const r = await fetch(WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [
+        { role: 'system', content: SYS },
+        { role: 'user',   content: msg }
+      ]
+    })
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Worker error ${r.status}: ${err}`);
+  }
+  const data = await r.json();
+  const text = data.choices?.[0]?.message?.content || '';
+  return JSON.parse(text.replace(/```json|```/g,'').trim());
+}
+
+// ═══════════════════════════════════════════════
+//  CHAT UI
+// ═══════════════════════════════════════════════
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function renderTable(cols, rows) {
+  if (!rows.length) return `<p style="color:var(--t3);font-size:11px;margin-top:6px;">No results found.</p>`;
+  const th = cols.map(c=>`<th>${esc(c)}</th>`).join('');
+  const tb = rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tbl-wrap"><table class="rtbl"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>
+          <div class="row-ct">${rows.length} row${rows.length!==1?'s':''}</div>`;
+}
+
+function renderSQL(sql) {
+  const escaped = esc(sql);
+  return `<div class="sql-box">
+    <div class="sql-hd"><span class="sql-tag">Generated SQL</span><span class="sql-copy" data-sql="${escaped}" onclick="copySql(this)">Copy</span></div>
+    <pre class="sql-pre">${escaped}</pre>
+  </div>`;
+}
+
+function copySql(el) {
+  navigator.clipboard?.writeText(el.dataset.sql).then(() => { el.textContent='Copied!'; setTimeout(()=>el.textContent='Copy',1500); });
+}
+
+function appendMsg(role, html, cls='') {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = `<div class="msg-who">${role==='user'?'You':'Assistant'}</div><div class="bubble ${cls}">${html}</div>`;
+  const msgs = g('msgs');
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+  return el;
+}
+
+async function send() {
+  const inp = g('cin');
+  const text = inp.value.trim();
+  if (!text || !db) return;
+  inp.value = ''; inp.style.height = '';
+  appendMsg('user', esc(text));
+  g('sendbtn').disabled = true;
+
+  const loader = appendMsg('bot', '<div class="dots"><i></i><i></i><i></i></div>');
+  try {
+    const res = await callLLM(text);
+    loader.remove();
+
+    if (res.type === 'off_topic') { appendMsg('bot', esc(res.message), 'err'); return; }
+
+    if (res.type === 'query') {
+      let html = res.answer_prefix ? `<p style="margin-bottom:7px">${esc(res.answer_prefix)}</p>` : '';
+      try {
+        const { columns, rows } = runSQL(res.sql);
+        html += renderTable(columns, rows);
+      } catch(e) {
+        html += `<p style="color:var(--rose);font-size:11px">SQL error: ${esc(e.message)}</p>`;
+      }
+      html += renderSQL(res.sql);
+      appendMsg('bot', html);
+    }
+  } catch(e) {
+    loader.remove();
+    appendMsg('bot', `Error: ${esc(e.message)}`, 'err');
+  } finally {
+    g('sendbtn').disabled = false;
+    inp.focus();
+  }
+}
+
+function ask(el) { g('cin').value = el.textContent; send(); }
+function onKey(e) { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); send(); } }
+function grow(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,100)+'px'; }
+function g(id)    { return document.getElementById(id); }
+
+// ═══════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════
+(async () => { await initDB(); buildGraph(); })();
+</script>
+</body>
+</html>
