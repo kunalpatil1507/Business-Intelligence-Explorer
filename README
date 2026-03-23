@@ -2,7 +2,7 @@
 
 A graph-based data modeling and natural language query system built for the Forward Deployed Engineer assignment. Unifies fragmented business data (orders, deliveries, invoices, payments) into an interactive graph with an LLM-powered chat interface that translates plain English into SQL and returns data-backed answers.
 
-**[Live Demo](https://YOUR-USERNAME.github.io/graph-query-system)**
+**[Live Demo](https://kunalpatil1507.github.io/Business-Intelligence-Explorer/)**
 
 ---
 
